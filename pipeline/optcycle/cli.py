@@ -17,11 +17,12 @@ from .artifacts import (
     snapshot_submission_source,
     source_fingerprint,
 )
+from .arena import ArenaParseError, parse_arena_log, parse_job_id_line
 from .kernels import KERNELS, KernelError, get_kernel
 from .manifest import ManifestError, load_manifest, new_manifest, write_manifest
 from .render import read_events, render_analysis_template, render_experiment_readme
 from .process import run_streaming
-from .state import ExperimentState, StateError, require_state
+from .state import ExperimentState, StateError, can_keep, require_state
 
 
 class CliError(RuntimeError):
@@ -338,6 +339,218 @@ def _approve_static(
     return 0
 
 
+def _attempt_record(manifest: dict[str, Any], number: int) -> dict[str, Any]:
+    for attempt in manifest["arena"]["attempts"]:
+        if attempt.get("attempt") == number:
+            return attempt
+    raise CliError(f"Arena attempt {number} not found")
+
+
+def _write_result_json(path: Path, record: dict[str, Any]) -> None:
+    temporary = path.with_name(f"{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _arena(
+    args: argparse.Namespace,
+    repo: Path,
+    stdout: TextIO,
+    now: Callable[[], datetime],
+) -> int:
+    paths = find_experiment(repo, args.experiment_id)
+    manifest = load_manifest(paths.manifest)
+    current_state = ExperimentState(manifest["state"])
+    if args.new_attempt:
+        require_state(
+            current_state,
+            {ExperimentState.ARENA_PASSED, ExperimentState.ARENA_FAILED},
+            "arena --new-attempt",
+        )
+    else:
+        require_state(current_state, {ExperimentState.READY_FOR_ARENA}, "arena")
+    candidate_fingerprint = manifest["source"].get("candidate_fingerprint")
+    if source_fingerprint(repo) != candidate_fingerprint:
+        raise CliError("current source differs from the candidate; create a new experiment")
+
+    number = max(
+        (item.get("attempt", 0) for item in manifest["arena"]["attempts"]),
+        default=0,
+    ) + 1
+    attempt_dir = paths.arena / f"attempt-{number:03d}"
+    attempt_dir.mkdir(parents=True, exist_ok=False)
+    job_name = f"{args.experiment_id}-a{number:03d}"
+    attempt = {
+        "attempt": number,
+        "job_id": None,
+        "job_name": job_name,
+        "status": "SUBMITTING",
+        "exit_code": None,
+        "accuracy_passed": False,
+        "kernels": {},
+    }
+    manifest["arena"]["attempts"].append(attempt)
+    write_manifest(paths.manifest, manifest)
+    job_captured = False
+
+    def capture_job(line: str) -> None:
+        nonlocal job_captured
+        job_id = parse_job_id_line(line)
+        if job_id is None or job_captured:
+            return
+        job_captured = True
+        attempt["job_id"] = job_id
+        attempt["status"] = "RUNNING"
+        manifest["state"] = ExperimentState.ARENA_RUNNING.value
+        manifest["updated_at"] = now().isoformat()
+        write_manifest(paths.manifest, manifest)
+        append_event(
+            paths.events,
+            at=manifest["updated_at"],
+            event="ARENA_JOB_CAPTURED",
+            result="success",
+            metadata={"attempt": number, "job_id": job_id},
+        )
+
+    result_path = attempt_dir / "result.log"
+    result = run_streaming(
+        [str(repo / "scripts/rngd_test.sh")],
+        repo,
+        result_path,
+        {"RNGD_JOB_NAME": job_name},
+        stdout,
+        on_line=capture_job,
+    )
+    text = result_path.read_text(encoding="utf-8")
+    parse_error: ArenaParseError | None = None
+    try:
+        parsed = parse_arena_log(text)
+    except ArenaParseError as error:
+        parsed = error.partial
+        parse_error = error
+    if parsed.job_id is not None and attempt["job_id"] is None:
+        attempt["job_id"] = parsed.job_id
+    attempt.update(parsed.to_dict())
+    attempt["job_id"] = attempt["job_id"] or parsed.job_id
+    attempt["exit_code"] = result.exit_code
+    if attempt["job_id"] is None:
+        attempt["status"] = "SUBMIT_FAILED"
+        manifest["state"] = (
+            ExperimentState.ARENA_PASSED.value
+            if can_keep(manifest)
+            else ExperimentState.READY_FOR_ARENA.value
+        )
+    elif (
+        result.exit_code == 0
+        and parse_error is None
+        and parsed.status in {"SUCCEEDED", "COMPLETED"}
+        and parsed.accuracy_passed
+    ):
+        attempt["status"] = "SUCCEEDED"
+        manifest["state"] = ExperimentState.ARENA_PASSED.value
+    elif parsed.status in {"FAILED", "CANCELLED", "CANCELED"}:
+        attempt["status"] = parsed.status
+        manifest["state"] = (
+            ExperimentState.ARENA_PASSED.value
+            if can_keep(manifest)
+            else ExperimentState.ARENA_FAILED.value
+        )
+    else:
+        attempt["status"] = "RUNNING"
+        manifest["state"] = ExperimentState.ARENA_RUNNING.value
+    at = now().isoformat()
+    manifest["updated_at"] = at
+    write_manifest(paths.manifest, manifest)
+    _write_result_json(attempt_dir / "result.json", attempt)
+    append_event(
+        paths.events,
+        at=at,
+        event="ARENA_ATTEMPT",
+        result="success" if manifest["state"] == ExperimentState.ARENA_PASSED.value else "failure",
+        exit_code=result.exit_code,
+        metadata={"attempt": number, **({"job_id": attempt["job_id"]} if attempt["job_id"] else {})},
+    )
+    refresh_readme(paths, manifest)
+    if manifest["state"] != ExperimentState.ARENA_PASSED.value:
+        detail = str(parse_error) if parse_error else f"exit code {result.exit_code}"
+        raise CliError(f"Arena attempt did not pass: {detail}")
+    stdout.write(f"Arena PASS: job {attempt['job_id']}\n")
+    return 0
+
+
+def _sync_arena(
+    experiment_id: str,
+    repo: Path,
+    stdout: TextIO,
+    now: Callable[[], datetime],
+) -> int:
+    paths = find_experiment(repo, experiment_id)
+    manifest = load_manifest(paths.manifest)
+    require_state(
+        ExperimentState(manifest["state"]),
+        {ExperimentState.ARENA_RUNNING},
+        "sync-arena",
+    )
+    if not manifest["arena"]["attempts"]:
+        raise CliError("no Arena attempt to synchronize")
+    attempt = manifest["arena"]["attempts"][-1]
+    job_id = attempt.get("job_id")
+    if not isinstance(job_id, int):
+        raise CliError("running Arena attempt has no numeric job id")
+    attempt_dir = paths.arena / f"attempt-{attempt['attempt']:03d}"
+    sequence = max(
+        (int(path.stem.rsplit("-", 1)[1]) for path in attempt_dir.glob("sync-status-*.log")),
+        default=0,
+    ) + 1
+    status_path = attempt_dir / f"sync-status-{sequence:03d}.log"
+    logs_path = attempt_dir / f"sync-result-{sequence:03d}.log"
+    status_result = run_streaming(
+        ["furiosa-arena", "status", str(job_id)], repo, status_path, None, stdout
+    )
+    logs_result = run_streaming(
+        ["furiosa-arena", "logs", str(job_id)], repo, logs_path, None, stdout
+    )
+    combined = status_path.read_text(encoding="utf-8") + logs_path.read_text(encoding="utf-8")
+    with (attempt_dir / "result.log").open("a", encoding="utf-8") as handle:
+        handle.write(combined)
+    try:
+        parsed = parse_arena_log(combined)
+        parse_error = None
+    except ArenaParseError as error:
+        parsed = error.partial
+        parse_error = error
+    parsed.job_id = job_id
+    attempt.update(parsed.to_dict())
+    attempt["job_id"] = job_id
+    if parsed.status in {"SUCCEEDED", "COMPLETED"} and parsed.accuracy_passed and parse_error is None:
+        manifest["state"] = ExperimentState.ARENA_PASSED.value
+    elif parsed.status in {"FAILED", "CANCELLED", "CANCELED"}:
+        manifest["state"] = (
+            ExperimentState.ARENA_PASSED.value
+            if can_keep(manifest)
+            else ExperimentState.ARENA_FAILED.value
+        )
+    else:
+        manifest["state"] = ExperimentState.ARENA_RUNNING.value
+    at = now().isoformat()
+    manifest["updated_at"] = at
+    write_manifest(paths.manifest, manifest)
+    _write_result_json(attempt_dir / "result.json", attempt)
+    append_event(
+        paths.events,
+        at=at,
+        event="ARENA_SYNC",
+        result="success" if status_result.exit_code == 0 and logs_result.exit_code == 0 else "failure",
+        metadata={"attempt": attempt["attempt"], "job_id": job_id},
+    )
+    refresh_readme(paths, manifest)
+    stdout.write(f"Arena state: {manifest['state']}\n")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Kernel optimization experiment pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -362,6 +575,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     approve.add_argument("experiment_id")
     approve.add_argument("--note", required=True, help="human review conclusion")
+    arena = subparsers.add_parser("arena", help="explicitly submit a READY experiment to Arena")
+    arena.add_argument("experiment_id")
+    arena.add_argument("--new-attempt", action="store_true", help="remeasure a terminal Arena experiment")
+    sync = subparsers.add_parser("sync-arena", help="synchronize an already submitted Arena job")
+    sync.add_argument("experiment_id")
     return parser
 
 
@@ -389,6 +607,10 @@ def main(
             return _analyze(args, repo, stdout, now)
         if args.command == "approve-static":
             return _approve_static(args, repo, stdout, now)
+        if args.command == "arena":
+            return _arena(args, repo, stdout, now)
+        if args.command == "sync-arena":
+            return _sync_arena(args.experiment_id, repo, stdout, now)
         raise CliError(f"unsupported command: {args.command}")
     except (ArtifactError, CliError, KernelError, ManifestError, StateError) as error:
         stderr.write(f"error: {error}\n")
