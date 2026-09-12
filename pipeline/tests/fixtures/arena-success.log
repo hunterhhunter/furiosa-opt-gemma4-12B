@@ -5,17 +5,17 @@ submitted job 18961
 NPU kernel tests -- 3 cases against a precomputed reference, with on-device cycle counts
 
 ==> sliding_project_qkv
-[sliding_project_qkv q             ] max|Δ|=  0.03125  ->PASS
-[sliding_project_qkv k             ] max|Δ|=  0.01562  ->PASS
-[sliding_project_qkv v             ] max|Δ|=  0.03125  ->PASS
+[sliding_project_qkv q             ] max|Δ|=  0.03125  -> PASS
+[sliding_project_qkv k             ] max|Δ|=  0.01562  -> PASS
+[sliding_project_qkv v             ] max|Δ|=  0.03125  -> PASS
     cycles=250288
 
 ==> sliding_attention_output
-[sliding_attention_output          ] max|Δ|=  0.03125  ->PASS
+[sliding_attention_output          ] max|Δ|=  0.03125  -> PASS
     cycles=409907
 
 ==> decoder_feedforward
-[decoder_feedforward               ] max|Δ|=  0.00781  ->PASS
+[decoder_feedforward               ] max|Δ|=  0.00781  -> PASS
     cycles=3704175
 
 all 3 tests passed

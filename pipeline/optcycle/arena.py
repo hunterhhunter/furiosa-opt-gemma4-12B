@@ -53,20 +53,31 @@ def parse_arena_log(text: str) -> ArenaAttempt:
         except ValueError:
             parsed.exit_code = None
     else:
-        for line in text.splitlines():
-            if '"status"' not in line:
-                continue
-            try:
-                status_record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(status_record, dict):
-                status = status_record.get("status")
-                if isinstance(status, str):
-                    parsed.status = status.upper()
-                exit_code = status_record.get("exit_code")
-                if isinstance(exit_code, int):
-                    parsed.exit_code = exit_code
+        status_record = None
+        try:
+            candidate, _ = json.JSONDecoder().raw_decode(text.lstrip())
+            if isinstance(candidate, dict):
+                status_record = candidate
+        except json.JSONDecodeError:
+            pass
+        if status_record is None:
+            for line in text.splitlines():
+                if '"status"' not in line:
+                    continue
+                try:
+                    candidate = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    status_record = candidate
+                    break
+        if status_record is not None:
+            status = status_record.get("status")
+            if isinstance(status, str):
+                parsed.status = status.upper()
+            exit_code = status_record.get("exit_code")
+            if isinstance(exit_code, int):
+                parsed.exit_code = exit_code
 
     current: str | None = None
     pass_markers: dict[str, list[bool]] = {name: [] for name in KERNELS}
@@ -78,9 +89,9 @@ def parse_arena_log(text: str) -> ArenaAttempt:
             continue
         if current is None:
             continue
-        if "->PASS" in line:
+        if re.search(r"->\s*PASS\b", line):
             pass_markers[current].append(True)
-        elif "->FAIL" in line:
+        elif re.search(r"->\s*FAIL\b", line):
             pass_markers[current].append(False)
         cycle = CYCLE_PATTERN.search(line)
         if cycle:

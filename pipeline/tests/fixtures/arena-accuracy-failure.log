@@ -2,14 +2,14 @@
 submitted job 19002
 ==> job 19002 failed (exit 1); log follows
 ==> sliding_project_qkv
-[sliding_project_qkv q             ] ->PASS
-[sliding_project_qkv k             ] ->PASS
-[sliding_project_qkv v             ] ->PASS
+[sliding_project_qkv q             ] -> PASS
+[sliding_project_qkv k             ] -> PASS
+[sliding_project_qkv v             ] -> PASS
     cycles=250300
 ==> sliding_attention_output
-[sliding_attention_output          ] ->FAIL
+[sliding_attention_output          ] -> FAIL
     cycles=410000
 ==> decoder_feedforward
-[decoder_feedforward               ] ->PASS
+[decoder_feedforward               ] -> PASS
     cycles=3705000
 kernel tests failed

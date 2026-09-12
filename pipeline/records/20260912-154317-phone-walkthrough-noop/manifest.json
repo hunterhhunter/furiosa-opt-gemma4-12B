@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "experiment_id": "20260912-154317-phone-walkthrough-noop",
+  "kernel": {
+    "name": "sliding_attention_output",
+    "rust_path": "ops::sliding_attention_output"
+  },
+  "name": "phone-walkthrough-noop",
+  "hypothesis": "파이프라인 전체 동작 확인을 위해 소스 변경 없이 baseline과 candidate를 비교한다",
+  "state": "REJECTED",
+  "created_at": "2026-09-12T15:43:17.948635+09:00",
+  "updated_at": "2026-09-12T15:47:24.912175+09:00",
+  "git": {
+    "base_commit": "668fe2320a0f6cb3dfb43f141ef3e0b8120318be"
+  },
+  "source": {
+    "baseline_fingerprint": "6847551043afb11a2e6cc7fabb709cabe08d2fb8ef68050bd7f6c4ce2a1672d6",
+    "candidate_fingerprint": "6847551043afb11a2e6cc7fabb709cabe08d2fb8ef68050bd7f6c4ce2a1672d6"
+  },
+  "schedule": {
+    "baseline_sha256": "b8d4ed546a7a89a647eacf0c7804c1b2fcd433fad946d5fd9f96afe65c31db0e",
+    "candidate_sha256": "b8d4ed546a7a89a647eacf0c7804c1b2fcd433fad946d5fd9f96afe65c31db0e",
+    "analysis_sha256": "116f5b8a85553f4bd254a0376f431dc4d516502056effaa9162456cfe32c58dd",
+    "approved_note": "baseline과 candidate의 source fingerprint 및 schedule hash가 동일함을 확인했으며, 원격 실행과 결과 파싱 기능 검증만 진행한다"
+  },
+  "arena": {
+    "attempts": [
+      {
+        "attempt": 1,
+        "job_id": 21512,
+        "job_name": "20260912-154317-phone-walkthrough-noop-a001",
+        "status": "SUCCEEDED",
+        "exit_code": 0,
+        "accuracy_passed": true,
+        "kernels": {
+          "sliding_project_qkv": {
+            "cycles": 246694,
+            "passed": true
+          },
+          "sliding_attention_output": {
+            "cycles": 400339,
+            "passed": true
+          },
+          "decoder_feedforward": {
+            "cycles": 3703243,
+            "passed": true
+          }
+        }
+      }
+    ]
+  },
+  "decision": {
+    "result": "REJECT",
+    "reason": "파이프라인 전체 기능 검증용 no-op 실험으로 baseline과 candidate가 동일하여 성능 개선 근거가 없음",
+    "at": "2026-09-12T15:47:24.912175+09:00"
+  },
+  "artifacts": {
+    "baseline.patch": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "candidate.patch": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

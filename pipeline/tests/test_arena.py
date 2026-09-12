@@ -49,6 +49,20 @@ class ArenaParserTests(unittest.TestCase):
         self.assertEqual(raised.exception.partial.job_id, 18961)
         self.assertIn("sliding_project_qkv", raised.exception.partial.kernels)
 
+    def test_pretty_printed_status_json_is_parsed_before_kernel_log(self):
+        status = json.dumps(
+            {"id": 21512, "status": "SUCCEEDED", "exit_code": 0},
+            indent=2,
+        )
+        kernel_log = (FIXTURES / "arena-success.log").read_text(encoding="utf-8")
+        kernel_log = kernel_log[kernel_log.index("NPU kernel tests") :]
+
+        parsed = parse_arena_log(status + "\n" + kernel_log)
+
+        self.assertEqual(parsed.status, "SUCCEEDED")
+        self.assertEqual(parsed.exit_code, 0)
+        self.assertTrue(parsed.accuracy_passed)
+
 
 class ArenaCommandTests(unittest.TestCase):
     def setUp(self):
