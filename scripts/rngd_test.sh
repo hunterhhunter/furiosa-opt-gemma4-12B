@@ -6,7 +6,8 @@ cd "$CRATE"
 
 FIXTURE="ref/fixtures.safetensors"
 POLL_SECONDS="${RNGD_POLL_SECONDS:-5}"
-TIMEOUT="${RNGD_TIMEOUT:-1800}"
+JOB_TIMEOUT=70
+WAIT_TIMEOUT="${RNGD_WAIT_TIMEOUT:-1800}"
 
 build=1
 wait_for_result=1
@@ -62,13 +63,16 @@ chmod +x "$staging/remote_entrypoint.sh" "$staging/test_runtime"
 job_name="${RNGD_JOB_NAME:-rngd_test_$RANDOM}"
 
 echo "==> submitting $job_name ($(du -ch "$staging"/* | tail -1 | cut -f1) total)"
-submit_output=$(furiosa-arena submit \
-    "$staging/remote_entrypoint.sh" \
-    "$staging/test_runtime" \
-    "$staging/fixtures.safetensors" \
-    --name "$job_name" \
-    --entrypoint remote_entrypoint.sh \
-    --timeout "$TIMEOUT" 2>&1)
+if ! submit_output=$(furiosa-arena submit \
+        "$staging/remote_entrypoint.sh" \
+        "$staging/test_runtime" \
+        "$staging/fixtures.safetensors" \
+        --name "$job_name" \
+        --entrypoint remote_entrypoint.sh \
+        --timeout "$JOB_TIMEOUT" 2>&1); then
+    echo "$submit_output" >&2
+    exit 1
+fi
 echo "$submit_output"
 
 job=$(printf '%s\n' "$submit_output" | sed -n 's/.*submitted job \([0-9][0-9]*\).*/\1/p' | head -1)
@@ -94,7 +98,7 @@ is_terminal() {
 }
 
 echo "==> waiting on job $job (polling every ${POLL_SECONDS}s)"
-deadline=$(( SECONDS + TIMEOUT ))
+deadline=$(( SECONDS + WAIT_TIMEOUT ))
 state=""
 status_output=""
 while [ "$SECONDS" -lt "$deadline" ]; do
@@ -109,7 +113,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
 done
 
 if ! is_terminal "$state"; then
-    echo "rngd_test.sh: job $job still '${state:-unknown}' after ${TIMEOUT}s; cancel with: furiosa-arena cancel $job" >&2
+    echo "rngd_test.sh: job $job still '${state:-unknown}' after ${WAIT_TIMEOUT}s; cancel with: furiosa-arena cancel $job" >&2
     exit 1
 fi
 

@@ -201,6 +201,7 @@ The scheduler commands used for troubleshooting are:
   — tensor types, mapping expressions, and engine modules.
 - [furiosa-arena-cli docs](https://github.com/kreatinj/furiosa-arena-cli#installation)
 - [moa-submitter-cli](https://github.com/micro2026-moa/moa-submitter-cli) — the submission CLI.
+- [Stage 1 커널 최적화 실행 가이드](docs/STAGE1_EXECUTION_GUIDE_KO.md) — 팀원을 위한 한국어 설치·실행·제출 튜토리얼.
 - [OPTIMIZATION.md](OPTIMIZATION.md) — the Stage 1 kernel optimization workflow.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — repository layout and host/RNGD split.
 - [SERVING.md](SERVING.md) — running the model as an HTTP server.
