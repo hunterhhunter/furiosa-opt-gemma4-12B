@@ -4,6 +4,10 @@
 한국어 빠른 시작 가이드다. 개발 환경 설치, 기준 성능 측정, schedule 분석, 최적화
 검증, 최종 제출까지 한 흐름으로 설명한다.
 
+팀 실험을 ID별로 남기고 baseline/candidate schedule, 정적 검토, Arena 결과,
+KEEP/REJECT와 재현 patch를 한 사이클로 관리하려면
+[커널 최적화 실험 파이프라인](../pipeline/README.md)을 함께 사용한다.
+
 ## 1. Stage 1에서 최적화하는 것
 
 Stage 1 평가 대상은 `src/ops.rs`에 선언된 다음 세 커널이다.
@@ -448,6 +452,7 @@ python3 scripts/generate_references.py
 
 ## 참고 자료
 
+- [커널 최적화 실험 파이프라인](../pipeline/README.md)
 - [Stage 1 최적화 절차](../OPTIMIZATION.md)
 - [레포 구조](../ARCHITECTURE.md)
 - [Furiosa Optimizer 공식 문서](https://developer.furiosa.ai/furiosa-opt/book/)

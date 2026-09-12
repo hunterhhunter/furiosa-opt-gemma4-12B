@@ -1,6 +1,6 @@
 # Kernel Optimization Pipeline Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Stage 1 커널 최적화 실험을 생성하고 baseline/candidate schedule, 정적 승인, 명시적 Arena 검증, keep/reject 및 공유 record까지 추적하는 반자동 Python CLI를 구현한다.
 
@@ -43,7 +43,7 @@
 - Produces: `load_manifest(path: Path) -> dict`, `write_manifest(path: Path, manifest: dict) -> None`, `validate_manifest(manifest: dict) -> None`
 - Consumes: no earlier task interfaces
 
-- [ ] **Step 1: Write failing state-machine tests**
+- [x] **Step 1: Write failing state-machine tests**
 
 ```python
 class StateTests(unittest.TestCase):
@@ -65,7 +65,7 @@ class StateTests(unittest.TestCase):
         self.assertFalse(can_keep({"arena": {"attempts": [{"accuracy_passed": False}]}}))
 ```
 
-- [ ] **Step 2: Write failing manifest tests**
+- [x] **Step 2: Write failing manifest tests**
 
 ```python
 class ManifestTests(unittest.TestCase):
@@ -87,7 +87,7 @@ class ManifestTests(unittest.TestCase):
             validate_manifest({"schema_version": 99})
 ```
 
-- [ ] **Step 3: Run tests and verify the imports fail**
+- [x] **Step 3: Run tests and verify the imports fail**
 
 Run:
 
@@ -97,7 +97,7 @@ python3 -m unittest pipeline.tests.test_state pipeline.tests.test_manifest -v
 
 Expected: FAIL because `pipeline.optcycle.state` and `pipeline.optcycle.manifest` do not exist.
 
-- [ ] **Step 4: Implement kernel mapping and state rules**
+- [x] **Step 4: Implement kernel mapping and state rules**
 
 ```python
 @dataclass(frozen=True)
@@ -114,11 +114,11 @@ KERNELS = {
 
 Define the persistent states exactly as `CREATED`, `BASELINE_READY`, `CANDIDATE_READY`, `READY_FOR_ARENA`, `ARENA_RUNNING`, `ARENA_PASSED`, `ARENA_FAILED`, `KEPT`, and `REJECTED`. `can_keep()` returns true only when at least one attempt has `accuracy_passed is True` and three kernel cycle values.
 
-- [ ] **Step 5: Implement schema-1 manifest with atomic writes**
+- [x] **Step 5: Implement schema-1 manifest with atomic writes**
 
 Write JSON to `manifest.json.tmp`, flush and `os.fsync`, then replace with `os.replace`. Validate the required top-level keys `schema_version`, `experiment_id`, `kernel`, `name`, `hypothesis`, `state`, `created_at`, `updated_at`, `git`, `source`, `schedule`, `arena`, and `decision` before every write.
 
-- [ ] **Step 6: Run Task 1 tests**
+- [x] **Step 6: Run Task 1 tests**
 
 Run:
 
@@ -128,7 +128,7 @@ python3 -m unittest pipeline.tests.test_state pipeline.tests.test_manifest -v
 
 Expected: all tests PASS.
 
-- [ ] **Step 7: Commit Task 1**
+- [x] **Step 7: Commit Task 1**
 
 ```bash
 git add pipeline/optcycle pipeline/tests
@@ -145,7 +145,7 @@ git commit -m "Add optimization pipeline state model"
 - Consumes: `KernelSpec` from `kernels.py`
 - Produces: `ExperimentPaths`, `make_experiment_id()`, `find_experiment()`, `source_fingerprint()`, `snapshot_submission_source()`, `create_patch()`
 
-- [ ] **Step 1: Write failing path and ID tests**
+- [x] **Step 1: Write failing path and ID tests**
 
 ```python
 def test_make_experiment_id_uses_safe_slug(self):
@@ -159,15 +159,15 @@ def test_find_experiment_rejects_traversal(self):
         find_experiment(self.repo, "../outside")
 ```
 
-- [ ] **Step 2: Write failing fingerprint and snapshot tests**
+- [x] **Step 2: Write failing fingerprint and snapshot tests**
 
 Create a temporary fake repository with `src/ops.rs` and two `src/device/*.rs` files. Assert that changing file timestamps does not change the fingerprint, changing content does, and snapshot contains only the submission scope.
 
-- [ ] **Step 3: Write failing patch-reproduction test**
+- [x] **Step 3: Write failing patch-reproduction test**
 
 Create baseline and candidate snapshots, call `create_patch(baseline, candidate, patch_path)`, apply it to a copy of baseline using `git apply`, and assert the resulting fingerprint equals the candidate fingerprint.
 
-- [ ] **Step 4: Run artifact tests and verify failure**
+- [x] **Step 4: Run artifact tests and verify failure**
 
 Run:
 
@@ -177,19 +177,19 @@ python3 -m unittest pipeline.tests.test_artifacts -v
 
 Expected: FAIL because `pipeline.optcycle.artifacts` does not exist.
 
-- [ ] **Step 5: Implement safe experiment paths**
+- [x] **Step 5: Implement safe experiment paths**
 
 `ExperimentPaths` exposes typed `Path` properties for `manifest`, `events`, `source`, `schedule`, `build`, `arena`, and `decision`. Resolve every derived path and verify it is below `<repo>/target/pipeline` using `Path.relative_to()`.
 
-- [ ] **Step 6: Implement deterministic submission fingerprint**
+- [x] **Step 6: Implement deterministic submission fingerprint**
 
 Hash each relative POSIX path, a NUL separator, file bytes, and another NUL in lexical path order. Hash the concatenated per-file digests once more. Do not include timestamps, permissions, absolute paths, symlink targets outside the source root, `__pycache__`, or non-file entries.
 
-- [ ] **Step 7: Implement snapshots and patches without changing the working tree**
+- [x] **Step 7: Implement snapshots and patches without changing the working tree**
 
 Use `shutil.copy2` for `src/ops.rs` and `src/device/**`. Generate patch text with `git diff --no-index --binary --src-prefix=a/ --dst-prefix=b/`, normalize snapshot prefixes to repository-relative `src/...`, and accept exit code 1 as “differences found.” Exit codes above 1 are errors.
 
-- [ ] **Step 8: Run Task 2 tests**
+- [x] **Step 8: Run Task 2 tests**
 
 Run:
 
@@ -199,7 +199,7 @@ python3 -m unittest pipeline.tests.test_artifacts -v
 
 Expected: all tests PASS, including patch reproduction.
 
-- [ ] **Step 9: Commit Task 2**
+- [x] **Step 9: Commit Task 2**
 
 ```bash
 git add pipeline/optcycle/artifacts.py pipeline/tests/test_artifacts.py
@@ -219,15 +219,15 @@ git commit -m "Add optimization experiment artifacts"
 - Consumes: manifest and artifact interfaces from Tasks 1–2
 - Produces: `create`, `list`, and `show` CLI subcommands; `append_event()`; `render_experiment_readme()`
 
-- [ ] **Step 1: Write failing CLI create test**
+- [x] **Step 1: Write failing CLI create test**
 
 Invoke `main([...], repo_root=temp_repo, stdout=StringIO(), now=fixed_clock)` with `create --kernel decoder_feedforward --name copy-test --hypothesis 중간복사제거`. Assert exit code 0, state `CREATED`, one experiment directory, one `CREATED` JSONL event, and a README containing the hypothesis.
 
-- [ ] **Step 2: Write failing list/show tests**
+- [x] **Step 2: Write failing list/show tests**
 
 Create two manifests in different states. Assert `list` prints ID, kernel and state for both. Assert `show <ID>` prints the hypothesis and the exact next command `python3 pipeline/optimize.py baseline <ID>`.
 
-- [ ] **Step 3: Run CLI tests and verify failure**
+- [x] **Step 3: Run CLI tests and verify failure**
 
 Run:
 
@@ -237,7 +237,7 @@ python3 -m unittest pipeline.tests.test_cli -v
 
 Expected: FAIL because `pipeline.optcycle.cli` and renderer do not exist.
 
-- [ ] **Step 4: Implement dependency-injected CLI entrypoint**
+- [x] **Step 4: Implement dependency-injected CLI entrypoint**
 
 ```python
 def main(
@@ -253,7 +253,7 @@ def main(
 
 Discover the real repo by walking upward from `pipeline/optimize.py` until `Cargo.toml` and `src/ops.rs` are found. Tests always inject `repo_root`.
 
-- [ ] **Step 5: Add the executable entrypoint**
+- [x] **Step 5: Add the executable entrypoint**
 
 ```python
 #!/usr/bin/env python3
@@ -263,11 +263,11 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 6: Implement create/list/show and append-only events**
+- [x] **Step 6: Implement create/list/show and append-only events**
 
 Events contain only `at`, `event`, `result`, optional `exit_code`, and allowlisted metadata. README is regenerated from manifest and events after every successful state-changing command.
 
-- [ ] **Step 7: Run CLI tests and CLI help**
+- [x] **Step 7: Run CLI tests and CLI help**
 
 Run:
 
@@ -278,7 +278,7 @@ python3 pipeline/optimize.py --help
 
 Expected: tests PASS and help lists `create`, `list`, and `show`.
 
-- [ ] **Step 8: Commit Task 3**
+- [x] **Step 8: Commit Task 3**
 
 ```bash
 git add pipeline/optimize.py pipeline/optcycle/cli.py pipeline/optcycle/render.py pipeline/templates pipeline/tests/test_cli.py
@@ -299,11 +299,11 @@ git commit -m "Add optimization experiment CLI"
 - Produces: `baseline` and `candidate` CLI commands
 - Consumes: snapshot, patch, manifest, event, and state interfaces from Tasks 1–3
 
-- [ ] **Step 1: Write failing streaming-runner test**
+- [x] **Step 1: Write failing streaming-runner test**
 
 Run a temporary executable that prints one line to stdout, one to stderr, and exits 7. Assert both lines are present in the log, the terminal sink receives them, and `CommandResult.exit_code == 7`.
 
-- [ ] **Step 2: Write failing baseline integration test**
+- [x] **Step 2: Write failing baseline integration test**
 
 Use a fake `cargo` executable that locates the `--dump-schedule` argument and writes a non-empty JSON file. Run `baseline <ID>` and assert:
 
@@ -313,15 +313,15 @@ Use a fake `cargo` executable that locates the `--dump-schedule` argument and wr
 - state becomes `BASELINE_READY`;
 - compile argv contains the exact kernel path and `--exact`.
 
-- [ ] **Step 3: Write failing baseline error test**
+- [x] **Step 3: Write failing baseline error test**
 
 Fake cargo exits 2 without a schedule. Assert state remains `CREATED`, the failed attempt log and event remain, and a second call writes `attempt-002.log` without modifying attempt 1.
 
-- [ ] **Step 4: Write failing candidate integration test**
+- [x] **Step 4: Write failing candidate integration test**
 
 Modify fake `src/device/kernel.rs`, run candidate, and assert candidate snapshot, fingerprint, patch, schedule, and log exist and state becomes `CANDIDATE_READY`.
 
-- [ ] **Step 5: Run tests and verify failure**
+- [x] **Step 5: Run tests and verify failure**
 
 Run:
 
@@ -331,19 +331,19 @@ python3 -m unittest pipeline.tests.test_schedule_commands -v
 
 Expected: FAIL because runner and schedule commands are missing.
 
-- [ ] **Step 6: Implement streaming subprocess execution**
+- [x] **Step 6: Implement streaming subprocess execution**
 
 Use `subprocess.Popen` with `stderr=subprocess.STDOUT`, text mode and line buffering. Write each line to terminal and log, preserve exit code, and forward `KeyboardInterrupt` by sending SIGINT then waiting for the child.
 
-- [ ] **Step 7: Implement baseline and candidate as transactional stages**
+- [x] **Step 7: Implement baseline and candidate as transactional stages**
 
 Compile into attempt-specific temporary schedule paths. On success, validate non-empty JSON, compute SHA-256, and atomically move to the canonical baseline/candidate schedule path. On failure, keep attempt logs and temporary diagnostic files but do not update successful artifact fields or state.
 
-- [ ] **Step 8: Enforce one candidate per experiment**
+- [x] **Step 8: Enforce one candidate per experiment**
 
 After a successful candidate stage, later source changes cause Arena preflight to fail with a message directing the user to create a new experiment. `candidate` cannot overwrite an existing successful candidate.
 
-- [ ] **Step 9: Run Task 4 tests**
+- [x] **Step 9: Run Task 4 tests**
 
 Run:
 
@@ -353,7 +353,7 @@ python3 -m unittest pipeline.tests.test_schedule_commands -v
 
 Expected: all tests PASS.
 
-- [ ] **Step 10: Commit Task 4**
+- [x] **Step 10: Commit Task 4**
 
 ```bash
 git add pipeline/optcycle pipeline/tests/test_schedule_commands.py
@@ -373,19 +373,19 @@ git commit -m "Add schedule generation stages"
 - Produces: `render_analysis_template(manifest) -> str`
 - Consumes: canonical schedule paths and SHA-256 values from Task 4
 
-- [ ] **Step 1: Write failing analysis-template test**
+- [x] **Step 1: Write failing analysis-template test**
 
 Run `analyze <ID>` for a `CANDIDATE_READY` experiment. Assert `schedule/analysis.md` contains baseline/candidate paths and sections for makespan, context occupancy, overlap, source hotspots, memory, hypothesis evaluation, and Arena recommendation.
 
-- [ ] **Step 2: Write failing no-overwrite test**
+- [x] **Step 2: Write failing no-overwrite test**
 
 Edit `analysis.md`, call `analyze` again, and assert the command fails without changing the file. A `--print` option may render to stdout but must not overwrite the saved review.
 
-- [ ] **Step 3: Write failing approval-gate tests**
+- [x] **Step 3: Write failing approval-gate tests**
 
 Assert approval fails when analysis is absent, when either schedule hash no longer matches, and when the current source fingerprint differs from the recorded candidate. Assert successful approval records note and analysis SHA-256 and transitions to `READY_FOR_ARENA`.
 
-- [ ] **Step 4: Run tests and verify failure**
+- [x] **Step 4: Run tests and verify failure**
 
 Run:
 
@@ -395,11 +395,11 @@ python3 -m unittest pipeline.tests.test_static_review -v
 
 Expected: FAIL because `analyze` and `approve-static` are missing.
 
-- [ ] **Step 5: Implement template rendering and approval checks**
+- [x] **Step 5: Implement template rendering and approval checks**
 
 The template contains no computed claims. It presents fill-in fields as Markdown checklist items and explicitly labels user-entered conclusions as review decisions. `approve-static` hashes the completed file and stores the approval note and timestamp.
 
-- [ ] **Step 6: Run Task 5 tests and help**
+- [x] **Step 6: Run Task 5 tests and help**
 
 Run:
 
@@ -411,7 +411,7 @@ python3 pipeline/optimize.py approve-static --help
 
 Expected: tests PASS and both commands document their gates.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add pipeline/templates/analysis.md pipeline/optcycle pipeline/tests/test_static_review.py
@@ -433,15 +433,15 @@ git commit -m "Add static schedule review gate"
 - Produces: `arena` and `sync-arena` CLI commands
 - Consumes: `run_streaming`, current source fingerprint, and `scripts/rngd_test.sh`
 
-- [ ] **Step 1: Write failing Arena parser tests**
+- [x] **Step 1: Write failing Arena parser tests**
 
 Use the real output format already observed in this repository. Assert the success fixture extracts numeric Job ID, all three PASS values and cycles. Assert an accuracy failure does not set `accuracy_passed`, and a missing cycle raises `ArenaParseError` while preserving parsed partial data.
 
-- [ ] **Step 2: Write failing preflight tests**
+- [x] **Step 2: Write failing preflight tests**
 
 Assert `arena` refuses states other than `READY_FOR_ARENA`, refuses a modified current source fingerprint, and does not invoke the fake runner in either case.
 
-- [ ] **Step 3: Write failing successful Arena command test**
+- [x] **Step 3: Write failing successful Arena command test**
 
 Inject a fake runner that emits the success fixture. Assert the command uses:
 
@@ -451,7 +451,7 @@ env RNGD_JOB_NAME=<EXPERIMENT_ID>-a001 ./scripts/rngd_test.sh
 
 Assert `arena/attempt-001/result.log` and `result.json` exist, state becomes `ARENA_PASSED`, and all kernel cycles appear in README.
 
-- [ ] **Step 4: Write failing submit/interruption/sync tests**
+- [x] **Step 4: Write failing submit/interruption/sync tests**
 
 Test these cases independently:
 
@@ -461,7 +461,7 @@ Test these cases independently:
 - terminal failed Job becomes `ARENA_FAILED`;
 - `--new-attempt` creates `attempt-002` and preserves attempt 1.
 
-- [ ] **Step 5: Run tests and verify failure**
+- [x] **Step 5: Run tests and verify failure**
 
 Run:
 
@@ -471,15 +471,15 @@ python3 -m unittest pipeline.tests.test_arena -v
 
 Expected: FAIL because Arena integration is missing.
 
-- [ ] **Step 6: Implement incremental Job ID capture**
+- [x] **Step 6: Implement incremental Job ID capture**
 
 Extend `run_streaming` with an optional `on_line(line: str)` callback. When a line matches `submitted job ([0-9]+)`, store the Job ID immediately with an atomic manifest update and transition to `ARENA_RUNNING`.
 
-- [ ] **Step 7: Implement strict result parsing**
+- [x] **Step 7: Implement strict result parsing**
 
 Accept `ARENA_PASSED` only when the command or synchronized Job succeeds, all three named kernels contain `->PASS`, and all three cycle values are present. Keep raw result logs locally for every other outcome.
 
-- [ ] **Step 8: Run Task 6 tests**
+- [x] **Step 8: Run Task 6 tests**
 
 Run:
 
@@ -489,7 +489,7 @@ python3 -m unittest pipeline.tests.test_arena -v
 
 Expected: all tests PASS.
 
-- [ ] **Step 9: Commit Task 6**
+- [x] **Step 9: Commit Task 6**
 
 ```bash
 git add pipeline/optcycle pipeline/tests
@@ -511,23 +511,23 @@ git commit -m "Add gated Arena verification"
 - Produces: `build_export_manifest(local_manifest) -> dict`
 - Consumes: source patches, schedule hashes, Arena results, and state rules from prior tasks
 
-- [ ] **Step 1: Write failing decision tests**
+- [x] **Step 1: Write failing decision tests**
 
 Assert `--keep` fails without a valid PASS attempt, `--reject` is allowed after Arena failure, keep/reject are mutually exclusive, and a successful decision records reason and timestamp without modifying working source.
 
-- [ ] **Step 2: Write failing export-content test**
+- [x] **Step 2: Write failing export-content test**
 
 Export a final experiment and assert the record contains exactly `README.md`, `manifest.json`, `baseline.patch`, `candidate.patch`, and `REPRODUCE.md`. Assert it does not contain raw schedules, logs, snapshots, fixture, binaries, home-directory paths, environment maps, or token-like keys.
 
-- [ ] **Step 3: Write failing export no-overwrite test**
+- [x] **Step 3: Write failing export no-overwrite test**
 
 Export twice. The second call succeeds only when every existing file hash equals the newly rendered content; otherwise it fails and changes no file.
 
-- [ ] **Step 4: Write failing reproduction test**
+- [x] **Step 4: Write failing reproduction test**
 
 Apply `baseline.patch` and `candidate.patch` in order to a temporary checkout of the recorded base commit. Assert the reconstructed submission source fingerprint equals the exported candidate fingerprint.
 
-- [ ] **Step 5: Run tests and verify failure**
+- [x] **Step 5: Run tests and verify failure**
 
 Run:
 
@@ -537,15 +537,15 @@ python3 -m unittest pipeline.tests.test_export -v
 
 Expected: FAIL because decision/export commands are missing.
 
-- [ ] **Step 6: Implement decision rendering and sanitized export**
+- [x] **Step 6: Implement decision rendering and sanitized export**
 
 Construct export manifest from an explicit allowlist. Before writing, recursively reject absolute paths, keys containing `token`, `secret`, `credential`, or `environment`, and values containing the repository absolute path.
 
-- [ ] **Step 7: Implement safe worktree reproduction instructions**
+- [x] **Step 7: Implement safe worktree reproduction instructions**
 
 Render `REPRODUCE.md` with `git worktree add`, `git apply --check`, `git apply`, the exact Rust toolchain and `cargo furiosa-opt compile <rust_path> --exact --dump-schedule ...` command. Do not generate an executable script.
 
-- [ ] **Step 8: Run Task 7 tests**
+- [x] **Step 8: Run Task 7 tests**
 
 Run:
 
@@ -555,7 +555,7 @@ python3 -m unittest pipeline.tests.test_export -v
 
 Expected: all tests PASS.
 
-- [ ] **Step 9: Commit Task 7**
+- [x] **Step 9: Commit Task 7**
 
 ```bash
 git add pipeline/templates pipeline/optcycle pipeline/tests/test_export.py
@@ -574,15 +574,15 @@ git commit -m "Add experiment decisions and records"
 - Consumes: every CLI command from Tasks 1–7
 - Produces: team-facing quick start and verified end-to-end local workflow
 
-- [ ] **Step 1: Write the team quick start**
+- [x] **Step 1: Write the team quick start**
 
 Document prerequisites, the complete `create → baseline → candidate → analyze → approve-static → arena → decide → export` flow, status meanings, local versus shared artifact locations, recovery commands, and the fact that Arena and `moa-submitter` are different systems.
 
-- [ ] **Step 2: Add top-level documentation links**
+- [x] **Step 2: Add top-level documentation links**
 
 Link `pipeline/README.md` from the repository README and Stage 1 Korean guide without duplicating the full reference.
 
-- [ ] **Step 3: Run every Python test**
+- [x] **Step 3: Run every Python test**
 
 Run:
 
@@ -592,7 +592,7 @@ python3 -m unittest discover -s pipeline/tests -v
 
 Expected: all tests PASS with no real Arena submission.
 
-- [ ] **Step 4: Run syntax and repository checks**
+- [x] **Step 4: Run syntax and repository checks**
 
 Run:
 
@@ -604,7 +604,7 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Run a local CLI smoke flow through baseline schedule**
+- [x] **Step 5: Run a local CLI smoke flow through baseline schedule**
 
 Create a real experiment for `decoder_feedforward`, run `baseline`, and verify:
 
@@ -620,7 +620,7 @@ python3 pipeline/optimize.py show <PRINTED_EXPERIMENT_ID>
 
 Expected: state `BASELINE_READY`, non-empty baseline schedule and compile log under `target/pipeline/decoder_feedforward/<ID>/`. Do not modify the kernel and do not run Arena during this smoke test.
 
-- [ ] **Step 6: Inspect final change scope**
+- [x] **Step 6: Inspect final change scope**
 
 Run:
 
@@ -632,13 +632,13 @@ git diff -- pipeline README.md docs/STAGE1_EXECUTION_GUIDE_KO.md
 
 Expected: only planned pipeline implementation/documentation changes plus the pre-existing user changes are present; no generated `target/pipeline` artifact is staged.
 
-- [ ] **Step 7: Commit Task 8**
+- [x] **Step 7: Commit Task 8**
 
 ```bash
 git add pipeline README.md docs/STAGE1_EXECUTION_GUIDE_KO.md
 git commit -m "Document optimization pipeline workflow"
 ```
 
-- [ ] **Step 8: Run final verification after the commit**
+- [x] **Step 8: Run final verification after the commit**
 
 Run the complete test, syntax, shell and diff-check commands again from the committed tree. Record the test count, smoke experiment ID and commit IDs in the implementation handoff.
