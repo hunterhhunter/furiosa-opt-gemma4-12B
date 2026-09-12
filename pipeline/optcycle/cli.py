@@ -1,5 +1,7 @@
 import argparse
+import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -11,12 +13,15 @@ from .artifacts import (
     ExperimentPaths,
     find_experiment,
     make_experiment_id,
+    create_patch,
+    snapshot_submission_source,
     source_fingerprint,
 )
 from .kernels import KERNELS, KernelError, get_kernel
 from .manifest import ManifestError, load_manifest, new_manifest, write_manifest
 from .render import read_events, render_experiment_readme
-from .state import StateError
+from .process import run_streaming
+from .state import ExperimentState, StateError, require_state
 
 
 class CliError(RuntimeError):
@@ -130,6 +135,124 @@ def _show(experiment_id: str, repo: Path, stdout: TextIO) -> int:
     return 0
 
 
+def _next_attempt(directory: Path) -> int:
+    numbers = []
+    for path in directory.glob("attempt-*.log"):
+        try:
+            numbers.append(int(path.stem.rsplit("-", 1)[1]))
+        except ValueError:
+            continue
+    return max(numbers, default=0) + 1
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_schedule(path: Path) -> None:
+    if not path.is_file() or path.stat().st_size == 0:
+        raise CliError("compiler did not create a non-empty schedule")
+    try:
+        json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise CliError(f"compiler produced invalid schedule JSON: {error}") from error
+
+
+def _schedule_stage(
+    stage: str,
+    experiment_id: str,
+    repo: Path,
+    stdout: TextIO,
+    now: Callable[[], datetime],
+) -> int:
+    paths = find_experiment(repo, experiment_id)
+    manifest = load_manifest(paths.manifest)
+    expected = ExperimentState.CREATED if stage == "baseline" else ExperimentState.BASELINE_READY
+    require_state(ExperimentState(manifest["state"]), {expected}, stage)
+    build_dir = paths.build / stage
+    build_dir.mkdir(parents=True, exist_ok=True)
+    attempt = _next_attempt(build_dir)
+    label = f"attempt-{attempt:03d}"
+    log_path = build_dir / f"{label}.log"
+    temporary_schedule = build_dir / f"{label}.schedule.json"
+    temporary_source = build_dir / f"{label}-source"
+    snapshot_submission_source(repo, temporary_source)
+    argv = [
+        "cargo",
+        "furiosa-opt",
+        "compile",
+        manifest["kernel"]["rust_path"],
+        "--exact",
+        "--dump-schedule",
+        str(temporary_schedule),
+    ]
+    result = run_streaming(argv, repo, log_path, None, stdout)
+    at = now().isoformat()
+    event_name = f"{stage.upper()}_COMPILE"
+    if result.exit_code != 0:
+        append_event(
+            paths.events,
+            at=at,
+            event=event_name,
+            result="failure",
+            exit_code=result.exit_code,
+        )
+        refresh_readme(paths, manifest)
+        raise CliError(f"{stage} compile failed with exit code {result.exit_code}")
+    try:
+        _validate_schedule(temporary_schedule)
+        canonical_source = paths.source / stage
+        canonical_schedule = paths.schedule / f"{stage}.json"
+        if canonical_source.exists() or canonical_schedule.exists():
+            raise CliError(f"successful {stage} artifact already exists")
+        candidate_patch = paths.source / "candidate.patch"
+        temporary_patch = build_dir / f"{label}.patch"
+        if stage == "candidate":
+            create_patch(paths.source / "baseline", temporary_source, temporary_patch)
+        canonical_source.parent.mkdir(parents=True, exist_ok=True)
+        canonical_schedule.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(temporary_source, canonical_source)
+        os.replace(temporary_schedule, canonical_schedule)
+        if stage == "candidate":
+            os.replace(temporary_patch, candidate_patch)
+        fingerprint = source_fingerprint(canonical_source)
+        manifest["source"][f"{stage}_fingerprint"] = fingerprint
+        manifest["schedule"][stage] = {
+            "path": f"schedule/{stage}.json",
+            "sha256": _sha256(canonical_schedule),
+        }
+        manifest["state"] = (
+            ExperimentState.BASELINE_READY.value
+            if stage == "baseline"
+            else ExperimentState.CANDIDATE_READY.value
+        )
+        manifest["updated_at"] = at
+        write_manifest(paths.manifest, manifest)
+        append_event(
+            paths.events,
+            at=at,
+            event=event_name,
+            result="success",
+            exit_code=0,
+        )
+        refresh_readme(paths, manifest)
+    except (ArtifactError, CliError, OSError) as error:
+        append_event(
+            paths.events,
+            at=at,
+            event=event_name,
+            result="failure",
+            exit_code=result.exit_code,
+        )
+        raise CliError(str(error)) from error
+    stdout.write(f"{stage} ready: {canonical_schedule.relative_to(paths.root)}\n")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Kernel optimization experiment pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -140,6 +263,10 @@ def _parser() -> argparse.ArgumentParser:
     subparsers.add_parser("list", help="list experiments")
     show = subparsers.add_parser("show", help="show one experiment")
     show.add_argument("experiment_id")
+    baseline = subparsers.add_parser("baseline", help="generate the baseline schedule")
+    baseline.add_argument("experiment_id")
+    candidate = subparsers.add_parser("candidate", help="generate one candidate schedule")
+    candidate.add_argument("experiment_id")
     return parser
 
 
@@ -161,6 +288,8 @@ def main(
             return _list(repo, stdout)
         if args.command == "show":
             return _show(args.experiment_id, repo, stdout)
+        if args.command in {"baseline", "candidate"}:
+            return _schedule_stage(args.command, args.experiment_id, repo, stdout, now)
         raise CliError(f"unsupported command: {args.command}")
     except (ArtifactError, CliError, KernelError, ManifestError, StateError) as error:
         stderr.write(f"error: {error}\n")
