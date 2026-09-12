@@ -4,9 +4,11 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pipeline.optcycle.artifacts import (
     ArtifactError,
+    commit_artifacts,
     ExperimentPaths,
     create_patch,
     find_experiment,
@@ -106,6 +108,32 @@ class ArtifactTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(source_fingerprint(reproduced), source_fingerprint(candidate))
+
+    def test_artifact_commit_rolls_back_all_moves_after_partial_failure(self):
+        sources = []
+        destinations = []
+        for number in range(3):
+            source = self.repo / f"temporary-{number}"
+            destination = self.repo / "canonical" / f"artifact-{number}"
+            source.write_text(f"content-{number}\n", encoding="utf-8")
+            sources.append(source)
+            destinations.append(destination)
+        real_replace = os.replace
+        calls = 0
+
+        def fail_second_move(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("injected move failure")
+            real_replace(source, destination)
+
+        with patch("pipeline.optcycle.artifacts.os.replace", fail_second_move):
+            with self.assertRaisesRegex(ArtifactError, "artifact commit failed"):
+                commit_artifacts(list(zip(sources, destinations)))
+
+        self.assertTrue(all(path.is_file() for path in sources))
+        self.assertTrue(all(not path.exists() for path in destinations))
 
 
 if __name__ == "__main__":

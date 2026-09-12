@@ -13,6 +13,7 @@ from typing import Callable, Sequence, TextIO, Any
 from .artifacts import (
     ArtifactError,
     build_export_manifest,
+    commit_artifacts,
     ExperimentPaths,
     find_experiment,
     make_experiment_id,
@@ -231,14 +232,16 @@ def _schedule_stage(
                 repo, manifest["git"]["base_commit"], temporary_base
             )
             create_patch(temporary_base, temporary_source, temporary_patch)
-        canonical_source.parent.mkdir(parents=True, exist_ok=True)
-        canonical_schedule.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(temporary_source, canonical_source)
-        os.replace(temporary_schedule, canonical_schedule)
-        if stage == "candidate":
-            os.replace(temporary_patch, candidate_patch)
-        else:
-            os.replace(temporary_patch, paths.source / "baseline.patch")
+        canonical_patch = (
+            candidate_patch if stage == "candidate" else paths.source / "baseline.patch"
+        )
+        commit_artifacts(
+            [
+                (temporary_source, canonical_source),
+                (temporary_schedule, canonical_schedule),
+                (temporary_patch, canonical_patch),
+            ]
+        )
         fingerprint = source_fingerprint(canonical_source)
         manifest["source"][f"{stage}_fingerprint"] = fingerprint
         manifest["schedule"][stage] = {
@@ -260,6 +263,11 @@ def _schedule_stage(
             exit_code=0,
         )
         refresh_readme(paths, manifest)
+        if (
+            stage == "candidate"
+            and fingerprint == manifest["source"].get("baseline_fingerprint")
+        ):
+            stdout.write("warning: candidate source is identical to baseline\n")
     except (ArtifactError, CliError, OSError) as error:
         append_event(
             paths.events,

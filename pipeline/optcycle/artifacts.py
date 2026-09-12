@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -208,6 +209,31 @@ def create_patch(baseline: Path, candidate: Path, patch_path: Path) -> None:
         patch = patch.replace(b"b/right/src/", b"b/src/")
         patch_path.parent.mkdir(parents=True, exist_ok=True)
         patch_path.write_bytes(patch)
+
+
+def commit_artifacts(moves: list[tuple[Path, Path]]) -> None:
+    for source, destination in moves:
+        if not source.exists():
+            raise ArtifactError(f"temporary artifact is missing: {source}")
+        if destination.exists():
+            raise ArtifactError(f"artifact already exists: {destination}")
+    completed: list[tuple[Path, Path]] = []
+    try:
+        for source, destination in moves:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, destination)
+            completed.append((source, destination))
+    except OSError as error:
+        rollback_errors = []
+        for source, destination in reversed(completed):
+            try:
+                os.replace(destination, source)
+            except OSError as rollback_error:
+                rollback_errors.append(str(rollback_error))
+        detail = f"artifact commit failed: {error}"
+        if rollback_errors:
+            detail += f"; rollback failed: {'; '.join(rollback_errors)}"
+        raise ArtifactError(detail) from error
 
 
 def build_export_manifest(local_manifest: dict) -> dict:

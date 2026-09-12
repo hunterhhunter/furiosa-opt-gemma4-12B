@@ -178,10 +178,14 @@ worktree and do not change the current checkout.
 ```bash
 git worktree add {worktree} {manifest['git']['base_commit']}
 
-git -C {worktree} apply --check "{record}/baseline.patch"
-git -C {worktree} apply "{record}/baseline.patch"
-git -C {worktree} apply --check "{record}/candidate.patch"
-git -C {worktree} apply "{record}/candidate.patch"
+if [ -s "{record}/baseline.patch" ]; then
+  git -C {worktree} apply --check "{record}/baseline.patch"
+  git -C {worktree} apply "{record}/baseline.patch"
+fi
+if [ -s "{record}/candidate.patch" ]; then
+  git -C {worktree} apply --check "{record}/candidate.patch"
+  git -C {worktree} apply "{record}/candidate.patch"
+fi
 
 cargo furiosa-opt compile {rust_path} --exact \\
   --manifest-path {worktree}/Cargo.toml \\
