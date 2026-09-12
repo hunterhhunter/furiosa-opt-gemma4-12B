@@ -100,6 +100,58 @@ def render_experiment_readme(
     return "\n".join(lines) + "\n"
 
 
+def render_analysis_template(manifest: Mapping[str, Any]) -> str:
+    baseline = _artifact_path(manifest["schedule"].get("baseline"))
+    candidate = _artifact_path(manifest["schedule"].get("candidate"))
+    return f"""# Static schedule review: {manifest['experiment_id']}
+
+This document records a human review. Blank fields and checked boxes are reviewer
+decisions; the pipeline does not infer an improvement from this template.
+
+- Baseline schedule: `{baseline}`
+- Candidate schedule: `{candidate}`
+- Kernel: `{manifest['kernel']['name']}`
+- Hypothesis: {manifest['hypothesis']}
+
+## Makespan
+
+- [ ] Baseline value:
+- [ ] Candidate value:
+- [ ] Interpretation:
+
+## Context occupancy
+
+- [ ] Idle regions and utilization:
+- [ ] Context pressure:
+
+## Overlap
+
+- [ ] Compute and transfer overlap:
+- [ ] Serialization points:
+
+## Source hotspots
+
+- [ ] Viewer hotspot mapped to source:
+- [ ] Relevant operation or loop:
+
+## Memory
+
+- [ ] TDMA/PDMA behavior:
+- [ ] SRAM/VRF pressure and copies:
+
+## Hypothesis evaluation
+
+- [ ] Evidence supporting or rejecting the hypothesis:
+- [ ] Possible confounders:
+
+## Arena recommendation
+
+- [ ] Proceed to Arena validation
+- [ ] Revise candidate in a new experiment
+- Reviewer conclusion:
+"""
+
+
 def _artifact_path(value: Any) -> str:
     if isinstance(value, Mapping):
         return str(value.get("path") or "-")

@@ -19,7 +19,7 @@ from .artifacts import (
 )
 from .kernels import KERNELS, KernelError, get_kernel
 from .manifest import ManifestError, load_manifest, new_manifest, write_manifest
-from .render import read_events, render_experiment_readme
+from .render import read_events, render_analysis_template, render_experiment_readme
 from .process import run_streaming
 from .state import ExperimentState, StateError, require_state
 
@@ -253,6 +253,91 @@ def _schedule_stage(
     return 0
 
 
+def _analyze(
+    args: argparse.Namespace,
+    repo: Path,
+    stdout: TextIO,
+    now: Callable[[], datetime],
+) -> int:
+    paths = find_experiment(repo, args.experiment_id)
+    manifest = load_manifest(paths.manifest)
+    require_state(
+        ExperimentState(manifest["state"]),
+        {ExperimentState.CANDIDATE_READY},
+        "analyze",
+    )
+    text = render_analysis_template(manifest)
+    if args.print_only:
+        stdout.write(text)
+        return 0
+    analysis_path = paths.schedule / "analysis.md"
+    if analysis_path.exists():
+        raise CliError("analysis already exists; use --print to preview without overwriting")
+    analysis_path.write_text(text, encoding="utf-8")
+    at = now().isoformat()
+    manifest["schedule"]["analysis_path"] = "schedule/analysis.md"
+    manifest["updated_at"] = at
+    write_manifest(paths.manifest, manifest)
+    append_event(paths.events, at=at, event="ANALYSIS_CREATED", result="success")
+    refresh_readme(paths, manifest)
+    stdout.write(f"Created {analysis_path.relative_to(paths.root)}\n")
+    return 0
+
+
+def _resolve_artifact(paths: ExperimentPaths, relative: str) -> Path:
+    resolved = (paths.root / relative).resolve()
+    try:
+        resolved.relative_to(paths.root.resolve())
+    except ValueError as error:
+        raise CliError(f"artifact path escapes experiment: {relative}") from error
+    return resolved
+
+
+def _approve_static(
+    args: argparse.Namespace,
+    repo: Path,
+    stdout: TextIO,
+    now: Callable[[], datetime],
+) -> int:
+    paths = find_experiment(repo, args.experiment_id)
+    manifest = load_manifest(paths.manifest)
+    require_state(
+        ExperimentState(manifest["state"]),
+        {ExperimentState.CANDIDATE_READY},
+        "approve-static",
+    )
+    for stage in ("baseline", "candidate"):
+        record = manifest["schedule"].get(stage)
+        if not isinstance(record, dict) or not record.get("path") or not record.get("sha256"):
+            raise CliError(f"{stage} schedule record is incomplete")
+        artifact = _resolve_artifact(paths, record["path"])
+        if not artifact.is_file() or _sha256(artifact) != record["sha256"]:
+            raise CliError(f"{stage} schedule hash mismatch")
+    analysis_relative = manifest["schedule"].get("analysis_path")
+    if not analysis_relative:
+        raise CliError("analysis is missing; run analyze first")
+    analysis_path = _resolve_artifact(paths, analysis_relative)
+    if not analysis_path.is_file():
+        raise CliError("analysis file is missing; run analyze first")
+    recorded_fingerprint = manifest["source"].get("candidate_fingerprint")
+    if source_fingerprint(repo) != recorded_fingerprint:
+        raise CliError("current source differs from the candidate; create a new experiment")
+    candidate_snapshot = paths.source / "candidate"
+    if source_fingerprint(candidate_snapshot) != recorded_fingerprint:
+        raise CliError("candidate snapshot fingerprint mismatch")
+    at = now().isoformat()
+    manifest["schedule"]["approved_note"] = args.note
+    manifest["schedule"]["analysis_sha256"] = _sha256(analysis_path)
+    manifest["schedule"]["approved_at"] = at
+    manifest["state"] = ExperimentState.READY_FOR_ARENA.value
+    manifest["updated_at"] = at
+    write_manifest(paths.manifest, manifest)
+    append_event(paths.events, at=at, event="STATIC_APPROVED", result="success")
+    refresh_readme(paths, manifest)
+    stdout.write("Static review approved; experiment is READY_FOR_ARENA.\n")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Kernel optimization experiment pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -267,6 +352,16 @@ def _parser() -> argparse.ArgumentParser:
     baseline.add_argument("experiment_id")
     candidate = subparsers.add_parser("candidate", help="generate one candidate schedule")
     candidate.add_argument("experiment_id")
+    analyze = subparsers.add_parser("analyze", help="create a manual schedule review")
+    analyze.add_argument("experiment_id")
+    analyze.add_argument(
+        "--print", dest="print_only", action="store_true", help="print a fresh template without writing it"
+    )
+    approve = subparsers.add_parser(
+        "approve-static", help="approve unchanged static evidence for Arena"
+    )
+    approve.add_argument("experiment_id")
+    approve.add_argument("--note", required=True, help="human review conclusion")
     return parser
 
 
@@ -290,6 +385,10 @@ def main(
             return _show(args.experiment_id, repo, stdout)
         if args.command in {"baseline", "candidate"}:
             return _schedule_stage(args.command, args.experiment_id, repo, stdout, now)
+        if args.command == "analyze":
+            return _analyze(args, repo, stdout, now)
+        if args.command == "approve-static":
+            return _approve_static(args, repo, stdout, now)
         raise CliError(f"unsupported command: {args.command}")
     except (ArtifactError, CliError, KernelError, ManifestError, StateError) as error:
         stderr.write(f"error: {error}\n")
