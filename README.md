@@ -125,6 +125,10 @@ from the shared PRNG on both the Python and Rust sides.
 Follow [OPTIMIZATION.md](OPTIMIZATION.md) for the schedule-dump, bottleneck-analysis,
 kernel-tuning, and makespan-comparison workflow.
 
+For a recorded team workflow that preserves each hypothesis, source snapshot, schedule,
+Arena attempt, decision, and reproducible patch, use the
+[kernel optimization experiment pipeline](pipeline/README.md).
+
 ### Run the public RNGD check
 
 ```sh
@@ -202,6 +206,7 @@ The scheduler commands used for troubleshooting are:
 - [furiosa-arena-cli docs](https://github.com/kreatinj/furiosa-arena-cli#installation)
 - [moa-submitter-cli](https://github.com/micro2026-moa/moa-submitter-cli) — the submission CLI.
 - [Stage 1 커널 최적화 실행 가이드](docs/STAGE1_EXECUTION_GUIDE_KO.md) — 팀원을 위한 한국어 설치·실행·제출 튜토리얼.
+- [커널 최적화 실험 파이프라인](pipeline/README.md) — 실험별 schedule, Arena 근거, 결정과 재현 patch 기록.
 - [OPTIMIZATION.md](OPTIMIZATION.md) — the Stage 1 kernel optimization workflow.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — repository layout and host/RNGD split.
 - [SERVING.md](SERVING.md) — running the model as an HTTP server.
