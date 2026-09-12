@@ -109,6 +109,7 @@ exit 9
         self.assertEqual(manifest["state"], "BASELINE_READY")
         self.assertTrue(manifest["source"]["baseline_fingerprint"])
         self.assertTrue((root / "source/baseline/src/ops.rs").is_file())
+        self.assertTrue((root / "source/baseline.patch").is_file())
         self.assertTrue((root / "build/baseline/attempt-001.log").is_file())
         self.assertGreater((root / "schedule/baseline.json").stat().st_size, 0)
         args = self.args_log.read_text(encoding="utf-8").splitlines()

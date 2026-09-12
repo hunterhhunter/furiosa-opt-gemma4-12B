@@ -65,7 +65,7 @@ class ExperimentPaths:
 
     @property
     def decision(self) -> Path:
-        return self.root / "decision"
+        return self.root / "decision.md"
 
 
 def _slugify(name: str) -> str:
@@ -146,6 +146,38 @@ def snapshot_submission_source(repo: Path, destination: Path) -> None:
         shutil.copy2(source, target)
 
 
+def snapshot_git_submission_source(repo: Path, commit: str, destination: Path) -> None:
+    if destination.exists():
+        raise ArtifactError(f"snapshot destination already exists: {destination}")
+    listed = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", commit, "--", "src/ops.rs", "src/device"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if listed.returncode != 0:
+        raise ArtifactError(f"cannot read base commit {commit}: {listed.stderr.strip()}")
+    files = [line for line in listed.stdout.splitlines() if line]
+    if "src/ops.rs" not in files:
+        raise ArtifactError(f"base commit {commit} has no src/ops.rs")
+    for relative in files:
+        if relative != "src/ops.rs" and not relative.startswith("src/device/"):
+            continue
+        shown = subprocess.run(
+            ["git", "show", f"{commit}:{relative}"],
+            cwd=repo,
+            capture_output=True,
+            check=False,
+        )
+        if shown.returncode != 0:
+            stderr = shown.stderr.decode("utf-8", errors="replace")
+            raise ArtifactError(f"cannot read {relative} at {commit}: {stderr.strip()}")
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(shown.stdout)
+
+
 def create_patch(baseline: Path, candidate: Path, patch_path: Path) -> None:
     if patch_path.exists():
         raise ArtifactError(f"patch already exists: {patch_path}")
@@ -176,3 +208,63 @@ def create_patch(baseline: Path, candidate: Path, patch_path: Path) -> None:
         patch = patch.replace(b"b/right/src/", b"b/src/")
         patch_path.parent.mkdir(parents=True, exist_ok=True)
         patch_path.write_bytes(patch)
+
+
+def build_export_manifest(local_manifest: dict) -> dict:
+    schedule = local_manifest["schedule"]
+    attempts = []
+    for source in local_manifest["arena"]["attempts"]:
+        attempts.append(
+            {
+                key: source.get(key)
+                for key in (
+                    "attempt",
+                    "job_id",
+                    "job_name",
+                    "status",
+                    "exit_code",
+                    "accuracy_passed",
+                    "kernels",
+                )
+            }
+        )
+    return {
+        "schema_version": 1,
+        "experiment_id": local_manifest["experiment_id"],
+        "kernel": dict(local_manifest["kernel"]),
+        "name": local_manifest["name"],
+        "hypothesis": local_manifest["hypothesis"],
+        "state": local_manifest["state"],
+        "created_at": local_manifest["created_at"],
+        "updated_at": local_manifest["updated_at"],
+        "git": {"base_commit": local_manifest["git"]["base_commit"]},
+        "source": {
+            "baseline_fingerprint": local_manifest["source"].get("baseline_fingerprint"),
+            "candidate_fingerprint": local_manifest["source"].get("candidate_fingerprint"),
+        },
+        "schedule": {
+            "baseline_sha256": (schedule.get("baseline") or {}).get("sha256"),
+            "candidate_sha256": (schedule.get("candidate") or {}).get("sha256"),
+            "analysis_sha256": schedule.get("analysis_sha256"),
+            "approved_note": schedule.get("approved_note"),
+        },
+        "arena": {"attempts": attempts},
+        "decision": dict(local_manifest["decision"]),
+    }
+
+
+def validate_export_content(value, repo: Path, key: str = "root") -> None:
+    forbidden_keys = ("token", "secret", "credential", "environment")
+    if isinstance(value, dict):
+        for child_key, child_value in value.items():
+            if any(term in str(child_key).lower() for term in forbidden_keys):
+                raise ArtifactError(f"forbidden export key: {child_key}")
+            validate_export_content(child_value, repo, str(child_key))
+    elif isinstance(value, list):
+        for child in value:
+            validate_export_content(child, repo, key)
+    elif isinstance(value, str):
+        if repo.resolve().as_posix() in value:
+            raise ArtifactError(f"repository absolute path found in export field {key}")
+        if Path(value).is_absolute():
+            raise ArtifactError(f"absolute path found in export field {key}")

@@ -152,6 +152,54 @@ decisions; the pipeline does not infer an improvement from this template.
 """
 
 
+def render_decision(manifest: Mapping[str, Any]) -> str:
+    decision = manifest["decision"]
+    return f"""# Experiment decision
+
+- Experiment: {manifest['experiment_id']}
+- Result: {decision['result']}
+- Decided at: {decision['at']}
+- Reason: {decision['reason']}
+
+This record changes no source file or Git state.
+"""
+
+
+def render_reproduce(manifest: Mapping[str, Any]) -> str:
+    experiment_id = manifest["experiment_id"]
+    worktree = f"../reproduce-{experiment_id}"
+    record = f"$PWD/pipeline/records/{experiment_id}"
+    rust_path = manifest["kernel"]["rust_path"]
+    return f"""# Reproduce {experiment_id}
+
+Review both patches before applying them. These commands use a separate Git
+worktree and do not change the current checkout.
+
+```bash
+git worktree add {worktree} {manifest['git']['base_commit']}
+
+git -C {worktree} apply --check "{record}/baseline.patch"
+git -C {worktree} apply "{record}/baseline.patch"
+git -C {worktree} apply --check "{record}/candidate.patch"
+git -C {worktree} apply "{record}/candidate.patch"
+
+cargo furiosa-opt compile {rust_path} --exact \\
+  --manifest-path {worktree}/Cargo.toml \\
+  --dump-schedule {worktree}/target/reproduced.schedule.json
+```
+
+Tool versions should be captured when reproducing:
+
+```bash
+rustup show active-toolchain
+cargo furiosa-opt --version
+furiosa-arena --version
+```
+
+The recorded RNGD cycles and any new measurement are separate observations.
+"""
+
+
 def _artifact_path(value: Any) -> str:
     if isinstance(value, Mapping):
         return str(value.get("path") or "-")

@@ -2,25 +2,36 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence, TextIO, Any
 
 from .artifacts import (
     ArtifactError,
+    build_export_manifest,
     ExperimentPaths,
     find_experiment,
     make_experiment_id,
     create_patch,
     snapshot_submission_source,
+    snapshot_git_submission_source,
     source_fingerprint,
+    validate_export_content,
 )
 from .arena import ArenaParseError, parse_arena_log, parse_job_id_line
 from .kernels import KERNELS, KernelError, get_kernel
 from .manifest import ManifestError, load_manifest, new_manifest, write_manifest
-from .render import read_events, render_analysis_template, render_experiment_readme
+from .render import (
+    read_events,
+    render_analysis_template,
+    render_decision,
+    render_experiment_readme,
+    render_reproduce,
+)
 from .process import run_streaming
 from .state import ExperimentState, StateError, can_keep, require_state
 
@@ -214,12 +225,20 @@ def _schedule_stage(
         temporary_patch = build_dir / f"{label}.patch"
         if stage == "candidate":
             create_patch(paths.source / "baseline", temporary_source, temporary_patch)
+        else:
+            temporary_base = build_dir / f"{label}-base"
+            snapshot_git_submission_source(
+                repo, manifest["git"]["base_commit"], temporary_base
+            )
+            create_patch(temporary_base, temporary_source, temporary_patch)
         canonical_source.parent.mkdir(parents=True, exist_ok=True)
         canonical_schedule.parent.mkdir(parents=True, exist_ok=True)
         os.replace(temporary_source, canonical_source)
         os.replace(temporary_schedule, canonical_schedule)
         if stage == "candidate":
             os.replace(temporary_patch, candidate_patch)
+        else:
+            os.replace(temporary_patch, paths.source / "baseline.patch")
         fingerprint = source_fingerprint(canonical_source)
         manifest["source"][f"{stage}_fingerprint"] = fingerprint
         manifest["schedule"][stage] = {
@@ -551,6 +570,101 @@ def _sync_arena(
     return 0
 
 
+def _decide(
+    args: argparse.Namespace,
+    repo: Path,
+    stdout: TextIO,
+    now: Callable[[], datetime],
+) -> int:
+    paths = find_experiment(repo, args.experiment_id)
+    manifest = load_manifest(paths.manifest)
+    current = ExperimentState(manifest["state"])
+    if args.keep:
+        require_state(current, {ExperimentState.ARENA_PASSED}, "decide --keep")
+        if not can_keep(manifest):
+            raise CliError("decide --keep requires a complete passing Arena attempt")
+        result = "KEEP"
+        next_state = ExperimentState.KEPT
+    else:
+        require_state(
+            current,
+            {ExperimentState.ARENA_PASSED, ExperimentState.ARENA_FAILED},
+            "decide --reject",
+        )
+        result = "REJECT"
+        next_state = ExperimentState.REJECTED
+    at = now().isoformat()
+    manifest["decision"] = {"result": result, "reason": args.reason, "at": at}
+    manifest["state"] = next_state.value
+    manifest["updated_at"] = at
+    write_manifest(paths.manifest, manifest)
+    paths.decision.write_text(render_decision(manifest), encoding="utf-8")
+    append_event(
+        paths.events,
+        at=at,
+        event=f"DECISION_{result}",
+        result="success",
+    )
+    refresh_readme(paths, manifest)
+    stdout.write(f"Decision recorded: {result}\n")
+    return 0
+
+
+def _export(experiment_id: str, repo: Path, stdout: TextIO) -> int:
+    paths = find_experiment(repo, experiment_id)
+    manifest = load_manifest(paths.manifest)
+    require_state(
+        ExperimentState(manifest["state"]),
+        {ExperimentState.KEPT, ExperimentState.REJECTED},
+        "export",
+    )
+    patches = {
+        "baseline.patch": paths.source / "baseline.patch",
+        "candidate.patch": paths.source / "candidate.patch",
+    }
+    for name, path in patches.items():
+        if not path.is_file():
+            raise CliError(f"required export artifact is missing: {name}")
+    exported = build_export_manifest(manifest)
+    exported["artifacts"] = {
+        name: {"sha256": _sha256(path)} for name, path in patches.items()
+    }
+    validate_export_content(exported, repo)
+    desired: dict[str, bytes] = {
+        "README.md": render_experiment_readme(
+            manifest, read_events(paths.events)
+        ).encode("utf-8"),
+        "manifest.json": (
+            json.dumps(exported, ensure_ascii=False, indent=2) + "\n"
+        ).encode("utf-8"),
+        "baseline.patch": patches["baseline.patch"].read_bytes(),
+        "candidate.patch": patches["candidate.patch"].read_bytes(),
+        "REPRODUCE.md": render_reproduce(exported).encode("utf-8"),
+    }
+    records_root = repo / "pipeline/records"
+    destination = records_root / experiment_id
+    if destination.exists():
+        existing_names = {path.name for path in destination.iterdir() if path.is_file()}
+        if existing_names != set(desired):
+            raise CliError("existing export differs; refusing to overwrite")
+        if any((destination / name).read_bytes() != content for name, content in desired.items()):
+            raise CliError("existing export differs; refusing to overwrite")
+        stdout.write(f"Export already matches: pipeline/records/{experiment_id}\n")
+        return 0
+    records_root.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{experiment_id}-", dir=records_root))
+    try:
+        for name, content in desired.items():
+            (staging / name).write_bytes(content)
+        os.replace(staging, destination)
+    except BaseException:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
+    stdout.write(f"Exported pipeline/records/{experiment_id}\n")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Kernel optimization experiment pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -580,6 +694,14 @@ def _parser() -> argparse.ArgumentParser:
     arena.add_argument("--new-attempt", action="store_true", help="remeasure a terminal Arena experiment")
     sync = subparsers.add_parser("sync-arena", help="synchronize an already submitted Arena job")
     sync.add_argument("experiment_id")
+    decide = subparsers.add_parser("decide", help="record the final keep or reject decision")
+    decide.add_argument("experiment_id")
+    decision = decide.add_mutually_exclusive_group(required=True)
+    decision.add_argument("--keep", action="store_true")
+    decision.add_argument("--reject", action="store_true")
+    decide.add_argument("--reason", required=True)
+    export = subparsers.add_parser("export", help="create a sanitized shared record")
+    export.add_argument("experiment_id")
     return parser
 
 
@@ -611,6 +733,10 @@ def main(
             return _arena(args, repo, stdout, now)
         if args.command == "sync-arena":
             return _sync_arena(args.experiment_id, repo, stdout, now)
+        if args.command == "decide":
+            return _decide(args, repo, stdout, now)
+        if args.command == "export":
+            return _export(args.experiment_id, repo, stdout)
         raise CliError(f"unsupported command: {args.command}")
     except (ArtifactError, CliError, KernelError, ManifestError, StateError) as error:
         stderr.write(f"error: {error}\n")
